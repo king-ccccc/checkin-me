@@ -1,0 +1,737 @@
+import os
+from datetime import datetime
+
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+# =====================================
+# PAGE CONFIG
+# =====================================
+st.set_page_config(
+    page_title="Check-In Me | ระบบบันทึกการเข้าเรียน",
+    page_icon="📝",
+    layout="wide"
+)
+
+BASE_DIR = os.path.dirname(__file__)
+DATA_DIR = os.path.join(BASE_DIR, "data")
+ATTENDANCE_FILE = os.path.join(DATA_DIR, "attendance.csv")
+SCORE_FILE = os.path.join(DATA_DIR, "scores.csv")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+
+# =====================================
+# LOAD CSS
+# =====================================
+def load_css():
+    css_file = os.path.join(BASE_DIR, "style.css")
+    if os.path.exists(css_file):
+        with open(css_file, encoding="utf-8") as f:
+            st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+    else:
+        st.warning("ไม่พบไฟล์ style.css ระบบจะใช้หน้าตาเริ่มต้น")
+
+
+load_css()
+
+
+# =====================================
+# LOGIN
+# =====================================
+USERS = {
+    "admin": "1234",
+    "teacher": "2569"
+}
+
+
+def login_page():
+    st.markdown("""
+    <div class="login-box">
+        <div class="login-title">📝 Check-In Me</div>
+        <div class="login-subtitle">ระบบบันทึกการเข้าเรียนออนไลน์</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        username = st.text_input("👤 ชื่อผู้ใช้")
+        password = st.text_input("🔒 รหัสผ่าน", type="password")
+        login_btn = st.form_submit_button("เข้าสู่ระบบ", type="primary")
+
+        if login_btn:
+            if username in USERS and USERS[username] == password:
+                st.session_state["login"] = True
+                st.session_state["username"] = username
+                st.success("เข้าสู่ระบบสำเร็จ")
+                st.rerun()
+            else:
+                st.error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+
+
+if "login" not in st.session_state:
+    st.session_state["login"] = False
+
+if "username" not in st.session_state:
+    st.session_state["username"] = ""
+
+if not st.session_state["login"]:
+    login_page()
+    st.stop()
+
+
+# =====================================
+# HELPER FUNCTIONS
+# =====================================
+def to_thai_date(date_obj):
+    days = [
+        "วันจันทร์", "วันอังคาร", "วันพุธ",
+        "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์", "วันอาทิตย์"
+    ]
+    months = [
+        "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน",
+        "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
+        "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+    ]
+    return f"{days[date_obj.weekday()]}ที่ {date_obj.day} {months[date_obj.month - 1]} พ.ศ. {date_obj.year + 543}"
+
+
+def load_subjects():
+    return pd.DataFrame([
+        {"รหัสวิชา": "ว23201", "ชื่อวิชา": "Coding 5"},
+        {"รหัสวิชา": "ว22102", "ชื่อวิชา": "การออกแบบและเทคโนโลยี"}
+    ])
+
+
+def load_students():
+    students = [
+        {"เลขที่": "1", "ชื่อ-นามสกุล": "ชญานนท์ พรมเกิด", "ชื่อเล่น": "เอิท", "ห้อง": "ม.3/1"},
+        {"เลขที่": "2", "ชื่อ-นามสกุล": "ภาโชค ชูเพชร", "ชื่อเล่น": "เน็ก", "ห้อง": "ม.3/1"},
+        {"เลขที่": "3", "ชื่อ-นามสกุล": "สิทธิพล ศักดิ์ศรี", "ชื่อเล่น": "เปา", "ห้อง": "ม.3/1"},
+        {"เลขที่": "4", "ชื่อ-นามสกุล": "สุพัตรา ศรีเจริญ", "ชื่อเล่น": "ไข่ตุ๋น", "ห้อง": "ม.3/1"},
+
+        {"เลขที่": "1", "ชื่อ-นามสกุล": "นันทวุธ เพชรคงทอง", "ชื่อเล่น": "คีม", "ห้อง": "ม.3/2"},
+        {"เลขที่": "2", "ชื่อ-นามสกุล": "ศุภวิชญ์ ศรีจันทร์", "ชื่อเล่น": "กีต้าร์", "ห้อง": "ม.3/2"},
+
+        {"เลขที่": "1", "ชื่อ-นามสกุล": "ปุญญาพัฒน์ ปิ่นทอง", "ชื่อเล่น": "สเปน", "ห้อง": "ม.3/3"},
+        {"เลขที่": "2", "ชื่อ-นามสกุล": "วรเมธ สุขสาลี", "ชื่อเล่น": "กัส", "ห้อง": "ม.3/3"},
+
+        {"เลขที่": "1", "ชื่อ-นามสกุล": "ธนกฤติ แพละออง", "ชื่อเล่น": "อิคคิว", "ห้อง": "ม.3/4"},
+        {"เลขที่": "2", "ชื่อ-นามสกุล": "วรพล สุดคล้าย", "ชื่อเล่น": "มาร์ค", "ห้อง": "ม.3/4"},
+        {"เลขที่": "3", "ชื่อ-นามสกุล": "ฑิตฐิตา วัณฑาพิศิษฎ์", "ชื่อเล่น": "กลอย", "ห้อง": "ม.3/4"},
+        {"เลขที่": "4", "ชื่อ-นามสกุล": "สิรวิชญ์ พระสมิง", "ชื่อเล่น": "พีพี", "ห้อง": "ม.3/4"},
+        {"เลขที่": "5", "ชื่อ-นามสกุล": "ศุภกิตติ์ ขำอนันต์", "ชื่อเล่น": "ชินจัง", "ห้อง": "ม.3/4"},
+        {"เลขที่": "6", "ชื่อ-นามสกุล": "อนุษรา ศักดิ์ศรี", "ชื่อเล่น": "น้ำหวาน", "ห้อง": "ม.3/4"},
+        {"เลขที่": "7", "ชื่อ-นามสกุล": "ภูทวัฒน์ โภคะสวัสดิ์", "ชื่อเล่น": "ภู", "ห้อง": "ม.3/4"},
+        {"เลขที่": "8", "ชื่อ-นามสกุล": "ปัทมา มาค้า", "ชื่อเล่น": "ปัท", "ห้อง": "ม.3/4"},
+        {"เลขที่": "9", "ชื่อ-นามสกุล": "กันตินันท์ มัญญู", "ชื่อเล่น": "ออโต้", "ห้อง": "ม.3/4"},
+        {"เลขที่": "10", "ชื่อ-นามสกุล": "ศาสตรา หมวดทอง", "ชื่อเล่น": "แตม", "ห้อง": "ม.3/4"},
+        {"เลขที่": "11", "ชื่อ-นามสกุล": "อินทุกานต์ มีจิตร", "ชื่อเล่น": "เพชรรุ้ง", "ห้อง": "ม.3/4"},
+        {"เลขที่": "12", "ชื่อ-นามสกุล": "พิชญธิดา สาระทิพย์", "ชื่อเล่น": "หนิง", "ห้อง": "ม.3/4"},
+        {"เลขที่": "13", "ชื่อ-นามสกุล": "กฤษณ สมจิตต์", "ชื่อเล่น": "กริช", "ห้อง": "ม.3/4"},
+        {"เลขที่": "14", "ชื่อ-นามสกุล": "อารยา แววสง่า", "ชื่อเล่น": "น้ำพริก", "ห้อง": "ม.3/4"},
+        {"เลขที่": "15", "ชื่อ-นามสกุล": "อัสมา เชื้อสง่า", "ชื่อเล่น": "สมา", "ห้อง": "ม.3/4"},
+    ]
+
+    df = pd.DataFrame(students)
+    df["รหัสนักเรียน"] = [
+        f"{row['ห้อง'].replace('ม.', '').replace('/', '')}{str(int(row['เลขที่'])).zfill(2)}"
+        for _, row in df.iterrows()
+    ]
+    df["เลขที่_num"] = df["เลขที่"].astype(int)
+    return df.sort_values(["ห้อง", "เลขที่_num"]).drop(columns=["เลขที่_num"])
+
+
+def load_attendance():
+    if os.path.exists(ATTENDANCE_FILE):
+        return pd.read_csv(ATTENDANCE_FILE, dtype=str).fillna("")
+    return pd.DataFrame(columns=[
+        "วันที่", "เลขที่", "ห้อง", "ชื่อเล่น", "ชื่อ-นามสกุล",
+        "รหัสนักเรียน", "ชื่อวิชา", "สถานะ", "Timestamp"
+    ])
+
+
+def save_attendance(df):
+    df.to_csv(ATTENDANCE_FILE, index=False, encoding="utf-8-sig")
+
+
+def load_scores():
+    if os.path.exists(SCORE_FILE):
+        return pd.read_csv(SCORE_FILE, dtype=str).fillna("")
+    return pd.DataFrame(columns=[
+        "วันที่บันทึก", "รหัสนักเรียน", "เลขที่", "ห้อง", "ชื่อเล่น",
+        "ชื่อ-นามสกุล", "กิจกรรม", "คะแนนเต็มกิจกรรม",
+        "คะแนนกิจกรรม", "คะแนนระหว่างภาคเต็ม 70",
+        "คะแนนสอบปลายภาคเต็ม 30", "คะแนนรวม 100", "Timestamp"
+    ])
+
+
+def save_scores(df):
+    df.to_csv(SCORE_FILE, index=False, encoding="utf-8-sig")
+
+
+def to_excel_bytes(df):
+    from io import BytesIO
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="scores")
+    return output.getvalue()
+
+
+def status_count(df, status):
+    return len(df[df["สถานะ"] == status])
+
+
+# =====================================
+# SIDEBAR
+# =====================================
+st.sidebar.markdown(
+    "<h2 style='text-align:center;'>📝 Check-In Me</h2>",
+    unsafe_allow_html=True
+)
+st.sidebar.markdown(
+    "<p style='text-align:center; color:#94A3B8; font-size:13px;'>ระบบบันทึกการเข้าเรียน</p>",
+    unsafe_allow_html=True
+)
+st.sidebar.success(f"ผู้ใช้งาน: {st.session_state['username']}")
+
+if st.sidebar.button("🚪 ออกจากระบบ", key="logout_btn"):
+    st.session_state["login"] = False
+    st.session_state["username"] = ""
+    st.rerun()
+
+st.sidebar.markdown("---")
+
+menu = st.sidebar.radio(
+    "เมนูการใช้งาน",
+    [
+        "📌 หน้าหลัก Dashboard",
+        "📚 จัดการรายวิชา",
+        "🧑‍🎓 จัดการรายชื่อนักเรียน",
+        "✏️ เช็คชื่อนักเรียน",
+        "🧮 เก็บคะแนน",
+        "📊 รายงานและส่งออก"
+    ]
+)
+
+
+# =====================================
+# DASHBOARD
+# =====================================
+if menu == "📌 หน้าหลัก Dashboard":
+    dash_date = st.date_input(
+        "📅 เลือกวันที่ต้องการดูข้อมูล",
+        datetime.now().date(),
+        key="dashboard_date"
+    )
+
+    st.subheader(f"📅 {to_thai_date(dash_date)}")
+    st.title("ภาพรวมสถิติการเข้าเรียน")
+
+    df_att_all = load_attendance()
+    selected_date = dash_date.strftime("%Y-%m-%d")
+    df_att = df_att_all[df_att_all["วันที่"] == selected_date]
+
+    if df_att.empty:
+        st.warning("ยังไม่มีข้อมูลการเช็คชื่อของวันที่เลือก")
+        st.info("ให้ไปที่เมนู ✏️ เช็คชื่อนักเรียน แล้วกดบันทึกผลก่อน")
+        st.stop()
+
+    count_present = status_count(df_att, "มาเรียน")
+    count_absent = status_count(df_att, "ขาดเรียน")
+    count_leave = status_count(df_att, "ลา")
+    count_late = status_count(df_att, "มาสาย")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card" style="border-top:5px solid #10B981;">
+            <h4>มาเรียน</h4>
+            <h1 style="color:#10B981;">{count_present}</h1>
+            <p>คน</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card" style="border-top:5px solid #EF4444;">
+            <h4>ขาดเรียน</h4>
+            <h1 style="color:#EF4444;">{count_absent}</h1>
+            <p>คน</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card" style="border-top:5px solid #B45309;">
+            <h4>ลา</h4>
+            <h1 style="color:#B45309;">{count_leave}</h1>
+            <p>คน</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col4:
+        st.markdown(f"""
+        <div class="metric-card" style="border-top:5px solid #D97706;">
+            <h4>มาสาย</h4>
+            <h1 style="color:#D97706;">{count_late}</h1>
+            <p>คน</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    status_summary = df_att["สถานะ"].value_counts().reset_index()
+    status_summary.columns = ["สถานะ", "จำนวน"]
+
+    fig = px.bar(
+        status_summary,
+        x="สถานะ",
+        y="จำนวน",
+        color="สถานะ",
+        text="จำนวน",
+        title="แผนภูมิสรุปสถิติการเข้าเรียน",
+        color_discrete_map={
+            "มาเรียน": "#10B981",
+            "ขาดเรียน": "#EF4444",
+            "ลา": "#B45309",
+            "มาสาย": "#D97706"
+        }
+    )
+
+    fig.update_traces(textposition="outside")
+    fig.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font_family="Sarabun",
+        yaxis_title="จำนวนคน",
+        xaxis_title="สถานะ"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("### รายละเอียดข้อมูลการเช็คชื่อ")
+    st.dataframe(df_att.sort_values(["ห้อง", "เลขที่"]), use_container_width=True)
+
+
+# =====================================
+# SUBJECTS
+# =====================================
+elif menu == "📚 จัดการรายวิชา":
+    st.title("📚 จัดการข้อมูลรายวิชา")
+    df_sub = load_subjects()
+
+    with st.form("subject_form"):
+        sub_id = st.text_input("รหัสวิชา")
+        sub_name = st.text_input("ชื่อวิชา")
+        if st.form_submit_button("บันทึกรายวิชา"):
+            st.success(f"บันทึกรายวิชา {sub_name} เรียบร้อยแล้ว")
+            st.info("เวอร์ชันนี้เป็นข้อมูลตัวอย่าง ยังไม่ได้บันทึกรายวิชาลงไฟล์")
+
+    st.dataframe(df_sub, use_container_width=True)
+
+
+# =====================================
+# STUDENTS
+# =====================================
+elif menu == "🧑‍🎓 จัดการรายชื่อนักเรียน":
+    st.title("🧑‍🎓 จัดการข้อมูลรายชื่อนักเรียน")
+    df_stu = load_students()
+
+    selected_room_manage = st.selectbox(
+        "เลือกห้องที่ต้องการดู",
+        ["ทั้งหมด"] + sorted(df_stu["ห้อง"].unique().tolist())
+    )
+
+    if selected_room_manage != "ทั้งหมด":
+        df_show = df_stu[df_stu["ห้อง"] == selected_room_manage]
+    else:
+        df_show = df_stu
+
+    st.info(f"จำนวนนักเรียน {len(df_show)} คน")
+    st.dataframe(df_show, use_container_width=True)
+
+
+# =====================================
+# CHECK ATTENDANCE
+# =====================================
+elif menu == "✏️ เช็คชื่อนักเรียน":
+    st.subheader("📝 เช็คชื่อนักเรียน")
+
+    df_sub = load_subjects()
+    df_stu_all = load_students()
+
+    selected_room = st.selectbox(
+        "เลือกห้องเรียน",
+        sorted(df_stu_all["ห้อง"].unique()),
+        key="check_room"
+    )
+
+    df_stu = df_stu_all[df_stu_all["ห้อง"] == selected_room].copy()
+
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        target_sub = st.selectbox(
+            "รายวิชา",
+            df_sub["ชื่อวิชา"].tolist(),
+            key="check_subject"
+        )
+
+    with col2:
+        check_date = st.date_input(
+            "วันที่",
+            datetime.now().date(),
+            key="check_date"
+        )
+
+    st.markdown("---")
+
+    h1, h2, h3, h4, h5, h6 = st.columns([0.7, 0.8, 1.2, 3.5, 1.6, 5])
+    with h1:
+        st.markdown("**เลขที่**")
+    with h2:
+        st.markdown("**ห้อง**")
+    with h3:
+        st.markdown("**ชื่อเล่น**")
+    with h4:
+        st.markdown("**ชื่อ-นามสกุล**")
+    with h5:
+        st.markdown("**รหัสนักเรียน**")
+    with h6:
+        st.markdown("**สถานะ**")
+
+    st.divider()
+
+    attendance_result = []
+
+    for _, row in df_stu.iterrows():
+        c1, c2, c3, c4, c5, c6 = st.columns([0.7, 0.8, 1.2, 3.5, 1.6, 5])
+
+        with c1:
+            st.write(row["เลขที่"])
+        with c2:
+            st.write(row["ห้อง"])
+        with c3:
+            st.write(row["ชื่อเล่น"])
+        with c4:
+            st.write(row["ชื่อ-นามสกุล"])
+        with c5:
+            st.write(row["รหัสนักเรียน"])
+        with c6:
+            status = st.radio(
+                "",
+                ["มาเรียน", "มาสาย", "ลา", "ขาดเรียน"],
+                horizontal=True,
+                key=f"status_{row['รหัสนักเรียน']}_{check_date}_{target_sub}",
+                label_visibility="collapsed"
+            )
+
+        attendance_result.append({
+            "วันที่": check_date.strftime("%Y-%m-%d"),
+            "เลขที่": row["เลขที่"],
+            "ห้อง": row["ห้อง"],
+            "ชื่อเล่น": row["ชื่อเล่น"],
+            "ชื่อ-นามสกุล": row["ชื่อ-นามสกุล"],
+            "รหัสนักเรียน": row["รหัสนักเรียน"],
+            "ชื่อวิชา": target_sub,
+            "สถานะ": status,
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+        st.divider()
+
+    col_total, col_save = st.columns([2, 4])
+
+    with col_total:
+        st.info(f"👥 นักเรียนทั้งหมด {len(df_stu)} คน")
+
+    with col_save:
+        if st.button("💾 บันทึกผลการเช็คชื่อ", type="primary", key="save_attendance"):
+            df_save = pd.DataFrame(attendance_result)
+            old_data = load_attendance()
+
+            if not old_data.empty:
+                old_data = old_data[
+                    ~(
+                        (old_data["วันที่"] == check_date.strftime("%Y-%m-%d")) &
+                        (old_data["ห้อง"] == selected_room) &
+                        (old_data["ชื่อวิชา"] == target_sub)
+                    )
+                ]
+
+            new_data = pd.concat([old_data, df_save], ignore_index=True)
+            save_attendance(new_data)
+
+            st.success(f"บันทึกข้อมูลวันที่ {check_date.strftime('%d/%m/%Y')} เรียบร้อยแล้ว")
+            st.dataframe(df_save, use_container_width=True)
+
+            csv = df_save.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="📥 ดาวน์โหลดไฟล์ CSV เฉพาะวันนี้",
+                data=csv,
+                file_name=f"attendance_{check_date}.csv",
+                mime="text/csv"
+            )
+
+
+# =====================================
+# REPORTS
+# =====================================
+elif menu == "📊 รายงานและส่งออก":
+    st.title("📊 รายงานและส่งออก")
+
+    df_att = load_attendance()
+
+    if df_att.empty:
+        st.warning("ยังไม่มีข้อมูลการเช็คชื่อ")
+        st.stop()
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        report_date = st.date_input("เลือกวันที่", datetime.now().date(), key="report_date")
+    with col2:
+        room_options = ["ทั้งหมด"] + sorted(df_att["ห้อง"].unique().tolist())
+        report_room = st.selectbox("เลือกห้อง", room_options)
+    with col3:
+        subject_options = ["ทั้งหมด"] + sorted(df_att["ชื่อวิชา"].unique().tolist())
+        report_subject = st.selectbox("เลือกรายวิชา", subject_options)
+
+    report = df_att[df_att["วันที่"] == report_date.strftime("%Y-%m-%d")].copy()
+
+    if report_room != "ทั้งหมด":
+        report = report[report["ห้อง"] == report_room]
+
+    if report_subject != "ทั้งหมด":
+        report = report[report["ชื่อวิชา"] == report_subject]
+
+    if report.empty:
+        st.warning("ไม่พบข้อมูลตามเงื่อนไขที่เลือก")
+        st.stop()
+
+    st.markdown("### ตารางรายงานการเช็คชื่อ")
+    st.dataframe(report.sort_values(["ห้อง", "เลขที่"]), use_container_width=True)
+
+    st.markdown("### สรุปจำนวนตามสถานะ")
+    summary_status = report["สถานะ"].value_counts().reset_index()
+    summary_status.columns = ["สถานะ", "จำนวน"]
+    st.dataframe(summary_status, use_container_width=True)
+
+    csv = report.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+    st.download_button(
+        "📥 ดาวน์โหลดรายงาน CSV",
+        csv,
+        f"attendance_report_{report_date}.csv",
+        "text/csv"
+    )
+
+    pivot = report.pivot_table(
+        index=["เลขที่", "ชื่อ-นามสกุล", "ห้อง"],
+        columns="วันที่",
+        values="สถานะ",
+        aggfunc="first"
+    ).reset_index()
+
+    st.markdown("### สรุปรายบุคคล")
+    st.dataframe(pivot.sort_values(["ห้อง", "เลขที่"]), use_container_width=True)
+elif menu == "🧮 เก็บคะแนน":
+
+    st.title("🧮 ระบบเก็บคะแนนนักเรียน")
+
+    df_stu = load_students()
+
+    selected_room = st.selectbox(
+        "เลือกห้องเรียน",
+        sorted(df_stu["ห้อง"].unique()),
+        key="score_room"
+    )
+
+    activity_name = st.text_input(
+        "ชื่อกิจกรรม / ใบงาน / ชิ้นงาน",
+        placeholder="เช่น ใบงานที่ 1 เรื่อง KidBright",
+        key="activity_name"
+    )
+
+    max_score = st.number_input(
+        "คะแนนเต็มกิจกรรมนี้",
+        min_value=1,
+        max_value=70,
+        value=10,
+        key="max_score"
+    )
+
+    final_exam_score = st.number_input(
+        "คะแนนสอบปลายภาค (เต็ม 30)",
+        min_value=0.0,
+        max_value=30.0,
+        value=0.0,
+        step=0.5,
+        key="final_exam_score"
+    )
+
+    df_room = df_stu[df_stu["ห้อง"] == selected_room].copy()
+
+    st.info(
+        "ระบบจะแปลงคะแนนกิจกรรมให้เป็นคะแนนระหว่างภาคเต็ม 70 "
+        "แล้วนำไปรวมกับคะแนนสอบปลายภาคเต็ม 30"
+    )
+
+    st.markdown("---")
+    st.subheader("กรอกคะแนนรายบุคคล")
+
+    score_result = []
+
+    for _, row in df_room.iterrows():
+
+        col1, col2, col3, col4, col5 = st.columns([0.7, 3, 1.4, 1.4, 1.4])
+
+        with col1:
+            st.write(row["เลขที่"])
+
+        with col2:
+            st.write(row["ชื่อ-นามสกุล"])
+
+        with col3:
+            activity_score = st.number_input(
+                "คะแนนกิจกรรม",
+                min_value=0.0,
+                max_value=float(max_score),
+                value=0.0,
+                step=0.5,
+                key=f"activity_score_{row['รหัสนักเรียน']}_{activity_name}_{selected_room}"
+            )
+
+        score_70 = (activity_score / max_score) * 70
+        total_score = score_70 + final_exam_score
+
+        with col4:
+            st.write(f"{score_70:.2f} / 70")
+
+        with col5:
+            st.write(f"{total_score:.2f} / 100")
+
+        score_result.append({
+            "วันที่บันทึก": datetime.now().strftime("%Y-%m-%d"),
+            "รหัสนักเรียน": row["รหัสนักเรียน"],
+            "เลขที่": row["เลขที่"],
+            "ห้อง": row["ห้อง"],
+            "ชื่อเล่น": row["ชื่อเล่น"],
+            "ชื่อ-นามสกุล": row["ชื่อ-นามสกุล"],
+            "กิจกรรม": activity_name,
+            "คะแนนเต็มกิจกรรม": max_score,
+            "คะแนนกิจกรรม": activity_score,
+            "คะแนนระหว่างภาคเต็ม 70": round(score_70, 2),
+            "คะแนนสอบปลายภาคเต็ม 30": final_exam_score,
+            "คะแนนรวม 100": round(total_score, 2),
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+
+    if st.button("💾 บันทึกคะแนน", type="primary", key="save_score"):
+
+        if activity_name.strip() == "":
+            st.error("กรุณากรอกชื่อกิจกรรมก่อนบันทึกคะแนน")
+            st.stop()
+
+        df_score_new = pd.DataFrame(score_result)
+        old_scores = load_scores()
+
+        if not old_scores.empty:
+            old_scores = old_scores[
+                ~(
+                    (old_scores["ห้อง"] == selected_room) &
+                    (old_scores["กิจกรรม"] == activity_name)
+                )
+            ]
+
+        all_scores = pd.concat(
+            [old_scores, df_score_new],
+            ignore_index=True
+        )
+
+        save_scores(all_scores)
+
+        st.success("บันทึกคะแนนลงไฟล์ data/scores.csv เรียบร้อยแล้ว")
+        st.dataframe(df_score_new, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("📊 สรุปคะแนนที่บันทึกแล้ว")
+
+    df_scores = load_scores()
+
+    if df_scores.empty:
+        st.warning("ยังไม่มีข้อมูลคะแนน")
+    else:
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            score_room_filter = st.selectbox(
+                "เลือกห้องเพื่อดูสรุปคะแนน",
+                ["ทั้งหมด"] + sorted(df_scores["ห้อง"].unique().tolist()),
+                key="score_summary_room"
+            )
+
+        with col_b:
+            activity_filter = st.selectbox(
+                "เลือกกิจกรรม",
+                ["ทั้งหมด"] + sorted(df_scores["กิจกรรม"].unique().tolist()),
+                key="score_summary_activity"
+            )
+
+        score_show = df_scores.copy()
+
+        if score_room_filter != "ทั้งหมด":
+            score_show = score_show[score_show["ห้อง"] == score_room_filter]
+
+        if activity_filter != "ทั้งหมด":
+            score_show = score_show[score_show["กิจกรรม"] == activity_filter]
+
+        for col in [
+            "คะแนนเต็มกิจกรรม", "คะแนนกิจกรรม",
+            "คะแนนระหว่างภาคเต็ม 70",
+            "คะแนนสอบปลายภาคเต็ม 30", "คะแนนรวม 100"
+        ]:
+            score_show[col] = pd.to_numeric(score_show[col], errors="coerce").fillna(0)
+
+        st.dataframe(
+            score_show.sort_values(["ห้อง", "เลขที่", "กิจกรรม"]),
+            use_container_width=True
+        )
+
+        summary_total = (
+            score_show
+            .groupby(["รหัสนักเรียน", "เลขที่", "ห้อง", "ชื่อเล่น", "ชื่อ-นามสกุล"], as_index=False)
+            .agg({
+                "คะแนนระหว่างภาคเต็ม 70": "max",
+                "คะแนนสอบปลายภาคเต็ม 30": "max",
+                "คะแนนรวม 100": "max"
+            })
+        )
+
+        st.markdown("### 🧾 สรุปคะแนนรวมรายบุคคล")
+        st.dataframe(
+            summary_total.sort_values(["ห้อง", "เลขที่"]),
+            use_container_width=True
+        )
+
+        csv = score_show.to_csv(
+            index=False,
+            encoding="utf-8-sig"
+        ).encode("utf-8-sig")
+
+        st.download_button(
+            "📥 ดาวน์โหลดคะแนน CSV",
+            csv,
+            "scores_report.csv",
+            "text/csv"
+        )
+
+        excel_data = to_excel_bytes(score_show)
+
+        st.download_button(
+            "📥 ดาวน์โหลดคะแนน Excel",
+            excel_data,
+            "scores_report.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
